@@ -477,10 +477,10 @@ static void *worker(void *a)
 		"# 1: index\n"
 		"# 2: time, s\n"
 		"# 3: V, V\n"
-		"# 4: I, V\n"
+		"# 4: I, A\n"
 		"# 5: pps:ch1 voltage, V\n"
-		"# 7: pps:ch1 current, A\n"
-		"# 8: vm voltage, V\n",
+		"# 6: pps:ch1 current, A\n"
+		"# 7: vm voltage, V\n",
 		start_time_struct.tm_year + 1900,
 		start_time_struct.tm_mon + 1,
 		start_time_struct.tm_mday,
