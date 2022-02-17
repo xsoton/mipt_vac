@@ -3,3 +3,5 @@ build
 *.elf
 test
 samples
+*.log
+*.plot
