@@ -32,13 +32,13 @@ int gpib_close(int dev)
 		fprintf(stderr, "# E: unable to clr gpib (ibsta = %d, iberr = %d)\n", ibsta, iberr);
 	}
 
-	r = gpib_write(dev, "*rst");
-	if (r == -1)
-	{
-		ret = r;
-	}
+	// r = gpib_write(dev, "*rst");
+	// if (r == -1)
+	// {
+	// 	ret = r;
+	// }
 
-	sleep(1);
+	// sleep(1);
 
 	r = ibloc(dev);
 	if (r & 0x8000)
@@ -96,7 +96,7 @@ int gpib_print(int dev, const char *format, ...)
 {
 	int r;
 	va_list args;
-	char buf[100];
+	char buf[100] = {0};
 	const size_t bufsize = 100;
 
 	va_start(args, format);
@@ -113,10 +113,10 @@ int gpib_print(int dev, const char *format, ...)
 	return r;
 }
 
-void gpib_print_error(int dev)
-{
-	char buf[100] = {0};
-	gpib_write(dev, "system:error?");
-	gpib_read(dev, buf, 100);
-	fprintf(stderr, "# [debug] error = %s\n", buf);
-}
+// void gpib_print_error(int dev)
+// {
+// 	char buf[100] = {0};
+// 	gpib_write(dev, "system:error?");
+// 	gpib_read(dev, buf, 100);
+// 	fprintf(stderr, "# [debug] error = %s\n", buf);
+// }
