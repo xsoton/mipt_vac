@@ -64,7 +64,7 @@ int gpib_read(int dev, char *buf, size_t buf_length)
 	else
 	{
 		ret = ibcnt;
-		if (ibcnt < buf_length)
+		if (ibcnt < (int)buf_length)
 		{
 			buf[ibcnt] = 0;
 		}

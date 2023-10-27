@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 #include <inttypes.h>
 #include <pthread.h>
@@ -17,239 +18,64 @@
 #include <argp.h>
 #include <error.h>
 #include "gpib.h"
+#include "v7.h"
+#include "pps.h"
+#include "opt.h"
 
 // === [DATE] ===
 struct tm start_time_struct;
 
-// === [ARGUMENTS] ===
-const char *argp_program_version = "vac 0.1";
-const char *argp_program_bug_address = "<killingrain@gmail.com>";
-static char doc[] =
-	"VAC -- a program for measuring I-V curves\v"
-	"TODO: This part of the documentation comes *after* the options; "
-	"note that the text is automatically filled, but it's possible "
-	"to force a line-break, e.g.\n<-- here.";
-static char args_doc[] = "SAMPLE_NAME";
-
-// The options we understand
-static struct argp_option options[] =
-{
-	{0,0,0,0, "I-V parameters:"},
-	{"V_start" , 'a', "double", 0, "Start voltage, V   (0.0   - 60.0, default  0.0 )"},
-	{"V_stop"  , 'b', "double", 0, "Stop voltage, V    (0.0   - 60.0, default 10.0 )"},
-	{"V_step"  , 's', "double", 0, "Voltage step, V    (0.001 -  1.0, default  0.1 )"},
-	{"I_max"   , 'i', "double", 0, "Maximum current, A (0.001 -  0.1, default  0.01)"},
-	{0,0,0,0, "Required:"},
-	{"Rf"      , 'r', "double", 0, "Feedback resistance of TIA, Ohm (1.0e3 - 1.0e6)"},
-	{"Tms"     , 't', "double", 0, "Scanning delay time, ms         (1.0e3 - 1.0e4)"},
-	{"polarity", 'p', "1/-1"  , 0, "Polarity of voltage             (1 or -1)"},
-	{0}
-};
-
-// parse arguments
-struct arguments
-{
-	int    sample_name_flag;
-	char  *sample_name;
-	double V_start;
-	double V_stop;
-	double V_step;
-	double I_max;
-	int    Rf_flag;
-	double Rf;
-	int    Tms_flag;
-	double Tms;
-	int    pol_flag;
-	int    pol;
-};
-
-static error_t parse_opt (int key, char *arg, struct argp_state *state)
-{
-	struct arguments *a = state->input;
-	double t;
-	int p;
-
-	switch (key)
-	{
-		case 'a':
-			t = atof(arg);
-			if ((t < 0.0) || (t > 60.0))
-			{
-				fprintf(stderr, "# E: <V_start> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->V_start = t;
-			break;
-
-		case 'b':
-			t = atof(arg);
-			if ((t < 0.0) || (t > 60.0))
-			{
-				fprintf(stderr, "# E: <V_stop> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->V_stop = t;
-			break;
-
-		case 's':
-			t = atof(arg);
-			if ((t < 0.001) || (t > 1.0))
-			{
-				fprintf(stderr, "# E: <V_step> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->V_step = t;
-			break;
-
-		case 'i':
-			t = atof(arg);
-			if ((t < 0.001) || (t > 0.1))
-			{
-				fprintf(stderr, "# E: <I_max> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->I_max = t;
-			break;
-
-		case 'r':
-			t = atof(arg);
-			if ((t < 1.0e3) || (t > 1.0e6))
-			{
-				fprintf(stderr, "# E: <Rf> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->Rf = t;
-			a->Rf_flag = 1;
-			break;
-
-		case 't':
-			t = atof(arg);
-			if ((t < 1.0e3) || (t > 1.0e4))
-			{
-				fprintf(stderr, "# E: <Tms> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->Tms = t;
-			a->Tms_flag = 1;
-			break;
-
-		case 'p':
-			p = atoi(arg);
-			if ((p != 1) && (p != -1))
-			{
-				fprintf(stderr, "# E: <polarity> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->pol = p;
-			a->pol_flag = 1;
-			break;
-
-		case ARGP_KEY_ARG:
-			a->sample_name = arg;
-			a->sample_name_flag = 1;
-			break;
-
-		case ARGP_KEY_NO_ARGS:
-			fprintf(stderr, "# E: <sample_name> has not specified. See \"vac --help\"\n");
-			a->sample_name_flag = 0;
-			//argp_usage (state);
-			return ARGP_ERR_UNKNOWN;
-
-		default:
-			return ARGP_ERR_UNKNOWN;
-	}
-	return 0;
-}
-
-static struct argp argp = {options, parse_opt, args_doc, doc};
-
-// === [GPIB] ===
-#define PPS_GPIB_NAME "AKIP-1142/3G"
-#define  VM_GPIB_NAME "AKIP-V7-78/1"
-
 // === [SOURCE] ===
-#define V_START 0.0
-#define V_STOP  10.0
-#define V_STEP  0.1
-#define I_MAX   0.01
-
-// === [VOLTMETER: RANGE CHECKER] ===
-#define V_100mV 0
-#define V_1V    1
-#define V_10V   2
-#define V_100V  3
-
-static double V_hi[4] = {0.095, 0.95, 9.5, 95.0};
-static double V_lo[4] = {0.085, 0.85, 8.5, 85.0};
-
-static int V_range = V_100mV;
-
-// returns new range
-static int V_check_range(int range, double V)
-{
-	if ((range < 0) || (range > 3))
-	{
-		return -1;
-	}
-
-	if (range == 0)
-	{
-		if (fabs(V) <= V_hi[range])
-		{
-			return range;
-		}
-		else
-		{
-			range++;
-		}
-	}
-
-	while((range >= 1) && (range <= 3))
-	{
-		if (fabs(V) < V_lo[range-1])
-		{
-			range--;
-			continue;
-		}
-
-		if (fabs(V) > V_hi[range])
-		{
-			range++;
-			continue;
-		}
-
-		break;
-	}
-
-	return range;
-}
+#define V_START +1e+00
+#define V_STOP  -1e+00
+#define V_STEP  +1e-01
+#define I_MAX   +1e-02
+#define RF      +1e+06
+#define DELAY   +1e-02
 
 // === threads ====
 static void *commander(void *);
 static void *worker(void *);
 
 // === utils ===
-static int get_run();
-static void set_run(int run_new);
+static int    get_run();
+static void   set_run(int run_new);
+static int    get_next();
+static void   set_next(int next_new);
 static double get_time();
+
+static int direction(double start, double stop);
 
 // === global variables
 static char dir_str[200];
 static pthread_rwlock_t run_lock;
 static int run;
+static pthread_rwlock_t next_lock;
+static int next;
 static char filename_vac[250];
 struct arguments arg = {0};
+
+// === measurements ===
+enum meas_state
+{
+	M_BEFORE = 0,
+	M_STAGE1,
+	M_STAGE2,
+	M_STAGE3,
+	M_AFTER,
+	M_STOP
+};
 
 // #define DEBUG
 
 // === program entry point
-int main(int argc, char const *argv[])
+int main(int argc, char **argv)
 {
 	int ret = 0;
 	int status;
 
 	time_t start_time;
-	// struct tm start_time_struct;
+	struct tm start_time_struct;
 
 	pthread_t t_commander;
 	pthread_t t_worker;
@@ -262,18 +88,14 @@ int main(int argc, char const *argv[])
 	arg.V_step           = V_STEP;
 	arg.I_max            = I_MAX;
 	arg.Rf_flag          = 0;
-	arg.Rf               = 0.0;
-	arg.Tms_flag         = 0;
-	arg.Tms              = 0.0;
-	arg.pol_flag         = 0;
-	arg.pol              = 1;
+	arg.Rf               = RF;
+	arg.Delay_flag       = 0;
+	arg.Delay            = DELAY;
 
-	status = argp_parse(&argp, argc, argv, 0, 0, &arg);
-	if ((status               != 0) ||
+	status = parse_arguments(argc, argv, &arg);
+	if ((status != 0) ||
 		(arg.sample_name_flag != 1) ||
-		(arg.Rf_flag          != 1) ||
-		(arg.Tms_flag         != 1) ||
-		(arg.pol_flag         != 1))
+		(arg.Delay_flag != 1))
 	{
 		fprintf(stderr, "# E: Error while parsing. See \"vac --help\"\n");
 		ret = -1;
@@ -281,18 +103,16 @@ int main(int argc, char const *argv[])
 	}
 
 	#ifdef DEBUG
-	fprintf(stderr, "sample_name_flag = %d\n" , arg.sample_name_flag);
-	fprintf(stderr, "sample_name      = %s\n" , arg.sample_name);
-	fprintf(stderr, "V_start          = %le\n", arg.V_start);
-	fprintf(stderr, "V_stop           = %le\n", arg.V_stop);
-	fprintf(stderr, "V_step           = %le\n", arg.V_step);
-	fprintf(stderr, "I_max            = %le\n", arg.I_max);
-	fprintf(stderr, "Rf_flag          = %d\n" , arg.Rf_flag);
-	fprintf(stderr, "Rf               = %le\n", arg.Rf);
-	fprintf(stderr, "Tms_flag         = %d\n" , arg.Tms_flag);
-	fprintf(stderr, "Tms              = %le\n", arg.Tms);
-	fprintf(stderr, "pol_flag         = %d\n" , arg.pol_flag);
-	fprintf(stderr, "pol              = %d\n" , arg.pol);
+		fprintf(stderr, "# sample_name_flag = %d\n" , arg.sample_name_flag);
+		fprintf(stderr, "# sample_name      = %s\n" , arg.sample_name);
+		fprintf(stderr, "# V_start          = %le\n", arg.V_start);
+		fprintf(stderr, "# V_stop           = %le\n", arg.V_stop);
+		fprintf(stderr, "# V_step           = %le\n", arg.V_step);
+		fprintf(stderr, "# I_max            = %le\n", arg.I_max);
+		fprintf(stderr, "# Rf_flag          = %d\n" , arg.Rf_flag);
+		fprintf(stderr, "# Rf               = %le\n", arg.Rf);
+		fprintf(stderr, "# Delay_flag       = %d\n" , arg.Delay_flag);
+		fprintf(stderr, "# Delay            = %le\n", arg.Delay);
 	#endif
 
 	// === get start time of experiment ===
@@ -306,6 +126,10 @@ int main(int argc, char const *argv[])
 	// === initialize run state variable
 	pthread_rwlock_init(&run_lock, NULL);
 	run = 1;
+
+	// === initialize next state variable
+	pthread_rwlock_init(&next_lock, NULL);
+	next = 0;
 
 	// === create dirictory in "20191012_153504_<experiment_name>" format
 	snprintf(dir_str, 200, "%04d-%02d-%02d_%02d-%02d-%02d_%s",
@@ -374,7 +198,11 @@ static void *commander(void *a)
 				printf(
 					"Help:\n"
 					"\th -- this help;\n"
+					"\tn -- next stage;\n"
 					"\tq -- exit the program;\n");
+				break;
+			case 'n':
+				set_next(1);
 				break;
 			case 'q':
 				set_run(0);
@@ -396,62 +224,65 @@ static void *worker(void *a)
 
 	int r;
 
-	int pps_fd;
-	int vm_fd;
+	struct pps   pps = {0};
+	// struct solar vm  = {0};
+	struct v7    am  = {0};
 
 	int    vac_index;
 	double vac_time;
-	double pps_voltage;
-	double pps_current;
-	double vm_voltage;
 	double vac_voltage;
 	double vac_current;
 
+	double pps_voltage1;
+	double pps_voltage2;
+	double pps_current1;
+	double pps_current2;
+	double vm_voltage;
+	double am_voltage;
+
 	double voltage;
+	int dir;
 
 	FILE  *vac_fp;
 	FILE  *gp;
 	char   buf[300];
 
-	int new_V_range;
+	enum meas_state state = M_BEFORE;
+	int i1, i2, i3;
 
-	r = gpib_open(PPS_GPIB_NAME);
-	if(r == -1)
+	double V_start, V_stop, V_step;
+
+	V_start = arg.V_start;
+	V_stop  = arg.V_stop;
+	V_step  = arg.V_step;
+
+	r = pps_open(&pps);
+	if(r < 0)
 	{
-		fprintf(stderr, "# E: Unable to open power supply (%d)\n", r);
-		goto worker_pps_ibfind;
+		fprintf(stderr, "# E: pps open (%d)\n", r);
+		goto worker_pps_close;
 	}
-	pps_fd = r;
 
-	r = gpib_open(VM_GPIB_NAME);
-	if(r == -1)
+	r = pps_init(&pps);
+	if(r < 0)
 	{
-		fprintf(stderr, "# E: Unable to open voltmeter (%d)\n", r);
-		goto worker_vm_ibfind;
+		fprintf(stderr, "# E: pps intit (%d)\n", r);
+		goto worker_pps_close;
 	}
-	vm_fd = r;
 
-	// === init pps
-	gpib_write(pps_fd, "output 0");
-	gpib_write(pps_fd, "instrument:nselect 1");
-	gpib_print(pps_fd, "voltage:limit %.1lfV", 60.1);
-	gpib_print(pps_fd, "voltage %.3lf", arg.V_start);
-	gpib_print(pps_fd, "current %.3lf", arg.I_max);
-	gpib_write(pps_fd, "channel:output 1");
-	// gpib_print_error(pps_fd);
+	r = v7_open(&am);
+	if(r < 0)
+	{
+		fprintf(stderr, "# E: v7 open (%d)\n", r);
+		goto worker_am_close;
+	}
 
-	// === init vm
-	gpib_write(vm_fd, "function \"voltage:dc\"");
-	gpib_write(vm_fd, "voltage:dc:range:auto off");
-	gpib_write(vm_fd, "voltage:dc:range 0.1");
-	gpib_write(vm_fd, "voltage:dc:nplcycles 10");
-	gpib_write(vm_fd, "trigger:source immediate");
-	gpib_write(vm_fd, "trigger:delay:auto off");
-	gpib_write(vm_fd, "trigger:delay 0");
-	gpib_write(vm_fd, "trigger:count 1");
-	gpib_write(vm_fd, "sample:count 1");
-	gpib_write(vm_fd, "sense:zero:auto on");
-	// gpib_print_error(vm_fd);
+	r = v7_init(&am);
+	if(r < 0)
+	{
+		fprintf(stderr, "# E: v7 init (%d)\n", r);
+		goto worker_am_close;
+	}
 
 	// === create vac file
 	vac_fp = fopen(filename_vac, "w+");
@@ -461,6 +292,8 @@ static void *worker(void *a)
 		goto worker_vac_fopen;
 	}
 	setlinebuf(vac_fp);
+
+	fprintf(stderr, "1\n");
 
 	// === write vac header
 	r = fprintf(vac_fp,
@@ -474,15 +307,17 @@ static void *worker(void *a)
 		"#   V_step      = %le\n"
 		"#   I_max       = %le\n"
 		"#   Rf          = %le\n"
-		"#   Tms         = %le\n"
-		"#   polarity    = %d\n"
-		"# 1: index\n"
-		"# 2: time, s\n"
-		"# 3: V, V\n"
-		"# 4: I, A\n"
-		"# 5: pps:ch1 voltage, V\n"
-		"# 6: pps:ch1 current, A\n"
-		"# 7: vm voltage, V\n",
+		"#   Ts          = %le\n"
+		"#  1: index\n"
+		"#  2: time, s\n"
+		"#  3: V, V\n"
+		"#  4: I, A\n"
+		"#  5: pps:ch1 voltage, V\n"
+		"#  6: pps:ch1 current, A\n"
+		"#  7: pps:ch2 voltage, V\n"
+		"#  8: pps:ch2 current, A\n"
+		"#  9: vm voltage, V\n"
+		"# 10: am voltage, V\n",
 		start_time_struct.tm_year + 1900,
 		start_time_struct.tm_mon + 1,
 		start_time_struct.tm_mday,
@@ -495,8 +330,7 @@ static void *worker(void *a)
 		arg.V_step,
 		arg.I_max,
 		arg.Rf,
-		arg.Tms,
-		arg.pol
+		arg.Delay
 	);
 	if(r < 0)
 	{
@@ -509,7 +343,7 @@ static void *worker(void *a)
 	gp = popen(buf, "w");
 	if (gp == NULL)
 	{
-		fprintf(stderr, "# E: unable to open gnuplot pipe (%s)\n", strerror(errno));
+		fprintf(stderr, "# E: Unable to open gnuplot pipe (%s)\n", strerror(errno));
 		goto worker_gp_popen;
 	}
 	setlinebuf(gp);
@@ -523,8 +357,8 @@ static void *worker(void *a)
 		"set key right bottom\n"
 		// "set xrange [%le:%le]\n"
 		"set xlabel \"Bias, V\"\n"
-		"set ylabel \"I, A\"\n"
-		"set format y \"%%.0s%%c\"\n"
+		"set ylabel \"Current, A\"\n"
+		"set format y \"%%.3s%%c\"\n"
 	);
 	if(r < 0)
 	{
@@ -535,51 +369,172 @@ static void *worker(void *a)
 	// === let the action begins!
 	vac_index = 0;
 
+	r = pps_set_v12(&pps, 0);
+	if(r < 0)
+	{
+		fprintf(stderr, "# E: Unable to set init voltage\n");
+		goto worker_set_init_voltage;
+	}
+
+	if (fabs(V_start) < V_step)
+		state = M_STAGE2;
+	else
+		state = M_STAGE1;
+
+	i1 = i2 = i3 = 0;
+
+
+// set_run(0);
 	while(get_run())
 	{
-		voltage = arg.V_start + vac_index * arg.V_step;
-		if (voltage > arg.V_stop)
+		switch(state)
+		{
+			case M_STAGE1:
+				dir = direction(0.0, V_start);
+				if (get_next())
+				{
+					V_start = voltage + V_step * dir;
+					state = M_STAGE2;
+					set_next(0);
+				}
+				else
+				{
+					voltage = 0.0 + i1 * V_step * dir;
+					if (((dir > 0) && (voltage >= V_start)) || ((dir < 0) && (voltage <= V_start)))
+						state = M_STAGE2;
+					else
+					{
+						i1++;
+						vac_index++;
+						break;
+					}
+				}
+			case M_STAGE2:
+				dir = direction(V_start, V_stop);
+				if (get_next())
+				{
+					V_stop = voltage + V_step * dir;
+					state = M_STAGE3;
+					set_next(0);
+				}
+				else
+				{
+					voltage = V_start + i2 * V_step * dir;
+					if (((dir > 0) && (voltage >= V_stop)) || ((dir < 0) && (voltage <= V_stop)))
+						state = M_STAGE3;
+					else
+					{
+						i2++;
+						vac_index++;
+						break;
+					}
+				}
+			case M_STAGE3:
+				if (get_next())
+				{
+					state = M_AFTER;
+					set_next(0);
+					break;
+				}
+				else
+				{
+					dir = direction(V_stop, 0.0);
+					voltage = V_stop + i3 * V_step * dir;
+					if (((dir > 0) && (voltage >= 0.0)) || ((dir < 0) && (voltage <= 0.0)))
+						state = M_AFTER;
+					else
+					{
+						i3++;
+						vac_index++;
+						break;
+					}
+				}
+			default:
+				state = M_STOP;
+		}
+
+		if (state > M_STAGE3)
 		{
 			set_run(0);
 			break;
 		}
 
-		snprintf(buf, 300, "voltage %.3lf", voltage);
-		gpib_write(pps_fd, buf);
+		fprintf(stderr, "# voltage = %lf\r", voltage);
 
-		usleep(arg.Tms * 1e3);
+		r = pps_set_v12(&pps, voltage);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to set voltage (%d)\n", r);
+			set_run(0);
+			break;
+		}
+
+		usleep(arg.Delay * 1e6);
 
 		vac_time = get_time();
 		if (vac_time < 0)
 		{
-			fprintf(stderr, "# E: Unable to get time\n");
+			fprintf(stderr, "# E: Unable to get time (%lf)\n", vac_time);
 			set_run(0);
 			break;
 		}
 
-		gpib_write(pps_fd, "measure:voltage:all?");
-		gpib_read(pps_fd, buf, 300);
-		sscanf(buf, "%lf", &pps_voltage);
+		r = pps_get_voltage(&pps, 1, &pps_voltage1);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to get pps 1 voltage (%d)\n", r);
+			set_run(0);
+			break;
+		}
 
-		gpib_write(pps_fd, "measure:current:all?");
-		gpib_read(pps_fd, buf, 300);
-		sscanf(buf, "%lf", &pps_current);
+		r = pps_get_current(&pps, 1, &pps_current1);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to get pps 1 current (%d)\n", r);
+			set_run(0);
+			break;
+		}
 
-		gpib_write(vm_fd, "read?");
-		gpib_read(vm_fd, buf, 300);
-		vm_voltage = atof(buf);
+		r = pps_get_voltage(&pps, 2, &pps_voltage2);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to get pps 2 voltage (%d)\n", r);
+			set_run(0);
+			break;
+		}
 
-		vac_voltage = pps_voltage * arg.pol;
-		vac_current = vm_voltage / arg.Rf;
+		r = pps_get_current(&pps, 2, &pps_current2);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to get pps 2 current (%d)\n", r);
+			set_run(0);
+			break;
+		}
 
-		r = fprintf(vac_fp, "%d\t%le\t%le\t%le\t%.3le\t%.3le\t%.8le\n",
+		r = v7_get_voltage(&am, &am_voltage);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to set voltage (%d)\n", r);
+			set_run(0);
+			break;
+		}
+
+		vm_voltage = 0;
+
+		vac_voltage = pps_voltage1 - pps_voltage2;
+		vac_current = am_voltage / arg.Rf;
+
+		r = fprintf(vac_fp, "%d\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\n",
 			vac_index,
 			vac_time,
 			vac_voltage,
 			vac_current,
-			pps_voltage,
-			pps_current,
-			vm_voltage
+			pps_voltage1,
+			pps_voltage2,
+			pps_current1,
+			pps_current2,
+			vm_voltage,
+			am_voltage
 		);
 		if(r < 0)
 		{
@@ -588,11 +543,8 @@ static void *worker(void *a)
 			break;
 		}
 
-		r = fprintf(gp,
-			"set title \"i = %d, t = %.3lf s\"\n"
-			"plot \"%s\" u 3:4 w l lw 1 title \"V = %.3lf V, I = %le A\"\n",
-			vac_index,
-			vac_time,
+		r = fprintf(gp, "set title \"i = %d, t = %.3lf s\"\n", vac_index, vac_time);
+		r = fprintf(gp, "plot \"%s\" u 3:4 w l lw 1 title \"V = %.3lf V, I = %le A\"\n",
 			filename_vac,
 			vac_voltage,
 			vac_current
@@ -604,48 +556,18 @@ static void *worker(void *a)
 			break;
 		}
 
-		new_V_range = V_check_range(V_range, vm_voltage);
-		//fprintf(stderr, "# D: V_range = %d, vm_voltage = %le, new_V_range = %d\n", V_range, vm_voltage, new_V_range);
-		if (new_V_range == -1)
-		{
-			set_run(0);
-			break;
-		}
-
-		if (new_V_range != V_range)
-		{
-			V_range = new_V_range;
-			switch(V_range)
-			{
-				case V_100mV:
-					gpib_write(vm_fd, "voltage:dc:range 0.1");
-					break;
-				case V_1V:
-					gpib_write(vm_fd, "voltage:dc:range 1");
-					break;
-				case V_10V:
-					gpib_write(vm_fd, "voltage:dc:range 10");
-					break;
-				case V_100V:
-					gpib_write(vm_fd, "voltage:dc:range 100");
-					break;
-			}
-		}
-
 		vac_index++;
 	}
 
-	gpib_write(pps_fd, "instrument:nselect 1");
-	gpib_write(pps_fd, "voltage 0");
-	gpib_write(pps_fd, "output 0");
-
-	gpib_write(pps_fd, "system:beeper");
+	pps_deinit(&pps);
 
 	r = fprintf(gp, "exit;\n");
 	if(r < 0)
 	{
 		fprintf(stderr, "# E: Unable to print to gp (%s)\n", strerror(r));
 	}
+
+	worker_set_init_voltage:
 
 	worker_gp_settings:
 
@@ -666,11 +588,11 @@ static void *worker(void *a)
 	}
 	worker_vac_fopen:
 
-	gpib_close(vm_fd);
-	worker_vm_ibfind:
+	v7_close(&am);
+	worker_am_close:
 
-	gpib_close(pps_fd);
-	worker_pps_ibfind:
+	pps_close(&pps);
+	worker_pps_close:
 
 	return NULL;
 }
@@ -690,6 +612,22 @@ static void set_run(int run_new)
 	pthread_rwlock_wrlock(&run_lock);
 		run = run_new;
 	pthread_rwlock_unlock(&run_lock);
+}
+
+static int get_next()
+{
+	int next_local;
+	pthread_rwlock_rdlock(&next_lock);
+		next_local = next;
+	pthread_rwlock_unlock(&next_lock);
+	return next_local;
+}
+
+static void set_next(int next_new)
+{
+	pthread_rwlock_wrlock(&next_lock);
+		next = next_new;
+	pthread_rwlock_unlock(&next_lock);
 }
 
 static double get_time()
@@ -730,4 +668,9 @@ static double get_time()
 	}
 
 	return ret;
+}
+
+static int direction(double start, double stop)
+{
+	return (stop >= start) ? 1 : -1;
 }
