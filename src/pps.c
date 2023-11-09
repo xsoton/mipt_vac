@@ -69,16 +69,17 @@ int pps_init (struct pps *p)
 	r = gpib_write(p->dev, "instrument:nselect 2"); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_print(p->dev, "voltage:limit 60.1V");  if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_print(p->dev, "voltage 0");            if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
-	r = gpib_print(p->dev, "current 0");            if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
+	r = gpib_print(p->dev, "current 0.01");         if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_write(p->dev, "instrument:nselect 1"); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_print(p->dev, "voltage:limit 60.1V");  if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_print(p->dev, "voltage 0");            if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
-	r = gpib_print(p->dev, "current 0");            if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
+	r = gpib_print(p->dev, "current 0.01");            if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	usleep(1e6);
 	r = gpib_write(p->dev, "instrument:nselect 2"); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_write(p->dev, "channel:output 1");     if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_write(p->dev, "instrument:nselect 1"); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_write(p->dev, "channel:output 1");     if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
+	usleep(1e6);
 
 	return 0;
 }
@@ -105,7 +106,7 @@ int pps_deinit (struct pps *p)
 	r = gpib_write(p->dev, "instrument:nselect 2"); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_write(p->dev, "channel:output 0");     if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_write(p->dev, "system:beeper");        if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
-
+	usleep(1e6);
 	return 0;
 }
 
@@ -130,6 +131,8 @@ int pps_set_voltage (struct pps *p, int chan, double voltage)
 		fprintf(stderr, "# E: pps voltage is out of range\n");
 		return -1;
 	}
+
+	// fprintf(stderr, "# pps_set_voltage\n");
 
 	r = gpib_print(p->dev, "instrument:nselect %d", chan); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
 	r = gpib_print(p->dev, "voltage %.3lf", voltage);      if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n", r); return -1;}
@@ -188,10 +191,13 @@ int pps_get_voltage (struct pps *p, int chan, double *voltage)
 		return -1;
 	}
 
+	// fprintf(stderr, "# pps_set_voltage\n");
+
 	r = gpib_print(p->dev, "instrument:nselect %d", chan); if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n",  r); return -1;}
 	r = gpib_print(p->dev, "measure:voltage?");            if(r == -1){fprintf(stderr, "# E: Unable to write to pps (%d)\n",  r); return -1;}
 	r = gpib_read(p->dev, buf, 300);                       if(r == -1){fprintf(stderr, "# E: Unable to read from pps (%d)\n", r); return -1;}
 	*voltage = atof(buf);
+	// fprintf(stderr, "# buf = \"%s\"\n", buf);
 
 	return 0;
 }
@@ -245,13 +251,13 @@ int pps_set_v12 (struct pps *p, double voltage)
 
 	if (voltage >= 0)
 	{
-		r = pps_set_voltage(p, 1, voltage); if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
-		r = pps_set_voltage(p, 2, 0);       if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
+		r = pps_set_voltage(p, 1, voltage);  if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
+		r = pps_set_voltage(p, 2, 0);        if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
 	}
 	else
 	{
-		r = pps_set_voltage(p, 1, 0);       if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
-		r = pps_set_voltage(p, 2, voltage); if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
+		r = pps_set_voltage(p, 1, 0);        if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
+		r = pps_set_voltage(p, 2, -voltage); if(r == -1){fprintf(stderr, "# E: pps set voltage (%d)\n",  r); return -1;}
 	}
 
 	return 0;

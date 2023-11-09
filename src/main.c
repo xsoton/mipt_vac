@@ -18,6 +18,7 @@
 #include <argp.h>
 #include <error.h>
 #include "gpib.h"
+#include "st.h"
 #include "v7.h"
 #include "pps.h"
 #include "opt.h"
@@ -225,7 +226,7 @@ static void *worker(void *a)
 	int r;
 
 	struct pps   pps = {0};
-	// struct solar vm  = {0};
+	struct st    vm  = {0};
 	struct v7    am  = {0};
 
 	int    vac_index;
@@ -284,6 +285,20 @@ static void *worker(void *a)
 		goto worker_am_close;
 	}
 
+	r = st_open(&vm);
+	if(r < 0)
+	{
+		fprintf(stderr, "# E: st open (%d)\n", r);
+		goto worker_vm_close;
+	}
+
+	r = st_init(&vm);
+	if(r < 0)
+	{
+		fprintf(stderr, "# E: st init (%d)\n", r);
+		goto worker_vm_close;
+	}
+
 	// === create vac file
 	vac_fp = fopen(filename_vac, "w+");
 	if(vac_fp == NULL)
@@ -293,7 +308,7 @@ static void *worker(void *a)
 	}
 	setlinebuf(vac_fp);
 
-	fprintf(stderr, "1\n");
+	// fprintf(stderr, "1\n");
 
 	// === write vac header
 	r = fprintf(vac_fp,
@@ -459,8 +474,12 @@ static void *worker(void *a)
 			break;
 		}
 
-		fprintf(stderr, "# voltage = %lf\r", voltage);
+		// fprintf(stderr, "\n");
+		// fprintf(stderr, "# state = %d\n", state);
+		fprintf(stderr, "\r# voltage = %lf", voltage);
+		fflush(stderr);
 
+		// fprintf(stderr, "# pps_set_v12 %lf\n", voltage);
 		r = pps_set_v12(&pps, voltage);
 		if(r < 0)
 		{
@@ -469,8 +488,10 @@ static void *worker(void *a)
 			break;
 		}
 
+		// fprintf(stderr, "# delay\n");
 		usleep(arg.Delay * 1e6);
 
+		// fprintf(stderr, "# get_time\n");
 		vac_time = get_time();
 		if (vac_time < 0)
 		{
@@ -479,6 +500,7 @@ static void *worker(void *a)
 			break;
 		}
 
+		// fprintf(stderr, "# pps_get_voltage 1\n");
 		r = pps_get_voltage(&pps, 1, &pps_voltage1);
 		if(r < 0)
 		{
@@ -486,7 +508,9 @@ static void *worker(void *a)
 			set_run(0);
 			break;
 		}
+		// fprintf(stderr, "# pps_voltage1 = %lf\n", pps_voltage1);
 
+		// fprintf(stderr, "# pps_get_current 1\n");
 		r = pps_get_current(&pps, 1, &pps_current1);
 		if(r < 0)
 		{
@@ -494,7 +518,9 @@ static void *worker(void *a)
 			set_run(0);
 			break;
 		}
+		// fprintf(stderr, "# pps_current1 = %lf\n", pps_current1);
 
+		// fprintf(stderr, "# pps_get_voltage 2\n");
 		r = pps_get_voltage(&pps, 2, &pps_voltage2);
 		if(r < 0)
 		{
@@ -502,7 +528,9 @@ static void *worker(void *a)
 			set_run(0);
 			break;
 		}
+		// fprintf(stderr, "# pps_voltage2 = %lf\n", pps_voltage2);
 
+		// fprintf(stderr, "# pps_get_current 2\n");
 		r = pps_get_current(&pps, 2, &pps_current2);
 		if(r < 0)
 		{
@@ -510,19 +538,39 @@ static void *worker(void *a)
 			set_run(0);
 			break;
 		}
+		// fprintf(stderr, "# pps_current2 = %lf\n", pps_current2);
 
+		// fprintf(stderr, "# v7_get_voltage\n");
 		r = v7_get_voltage(&am, &am_voltage);
 		if(r < 0)
 		{
-			fprintf(stderr, "# E: Unable to set voltage (%d)\n", r);
+			fprintf(stderr, "# E: Unable to get am voltage (%d)\n", r);
 			set_run(0);
 			break;
 		}
+		// fprintf(stderr, "# am_voltage = %lf\n", am_voltage);
 
-		vm_voltage = 0;
+		// fprintf(stderr, "# st_get_voltage\n");
+		r = st_get_voltage(&vm, &vm_voltage);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to get vm voltage (%d)\n", r);
+			set_run(0);
+			break;
+		}
+		// fprintf(stderr, "# vm_voltage = %lf\n", vm_voltage);
 
-		vac_voltage = pps_voltage1 - pps_voltage2;
+		// vm_voltage = 0;
+
+		// vac_voltage = pps_voltage1 - pps_voltage2;
+		vac_voltage = vm_voltage;
 		vac_current = am_voltage / arg.Rf;
+
+		fprintf(stderr, "\tV = %lf, I = %le", vac_voltage, vac_current);
+		fflush(stderr);
+
+		// fprintf(stderr, "# vac_voltage = %lf\n", vac_voltage);
+		// fprintf(stderr, "# vac_current = %le\n", vac_current);
 
 		r = fprintf(vac_fp, "%d\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\t%+le\n",
 			vac_index,
@@ -559,6 +607,7 @@ static void *worker(void *a)
 		vac_index++;
 	}
 
+	// fprintf(stderr, "# pps_deinit\n");
 	pps_deinit(&pps);
 
 	r = fprintf(gp, "exit;\n");
@@ -587,6 +636,10 @@ static void *worker(void *a)
 		fprintf(stderr, "# E: Unable to close file \"%s\" (%s)\n", filename_vac, strerror(errno));
 	}
 	worker_vac_fopen:
+
+	st_deinit(&vm);
+	st_close(&vm);
+	worker_vm_close:
 
 	v7_close(&am);
 	worker_am_close:
