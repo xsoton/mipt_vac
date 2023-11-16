@@ -16,7 +16,7 @@ static char args_doc[] = "SAMPLE_NAME";
 #define OPT_V_STOP  2 // --V_stop
 #define OPT_V_STEP  3 // --V_step
 #define OPT_I_MAX   4 // --I_max
-#define OPT_RF      5 // --Rf
+// #define OPT_RF      5 // --Rf
 #define OPT_DELAY   6 // --Delay
 
 // The options we understand
@@ -28,8 +28,8 @@ static struct argp_option options[] =
 	{"V_step"  , OPT_V_STEP , "double", 0, "Voltage step, V    (0.001 -  1.0, default  0.1 )", 0},
 	{"I_max"   , OPT_I_MAX  , "double", 0, "Maximum current, A (0.001 -  0.1, default  0.01)", 0},
 	{0,0,0,0, "Required:", 0},
-	{"Rf"      , OPT_RF     , "double", 0, "Feedback resistance of TIA, Ohm (+1.0e+03 - +1.0e07)", 0},
-	{"delay"   , OPT_DELAY  , "double", 0, "Scanning delay time, s          (+1.0e-03 - +1.0e03)", 0},
+	// {"Rf"      , OPT_RF     , "double", 0, "Feedback resistance of TIA, Ohm (+1.0e+03 - +1.0e07)", 0},
+	{"delay"   , OPT_DELAY  , "double", 0, "Scanning delay time, s (+1.0e-03 - +1.0e03)", 0},
 	{0}
 };
 
@@ -80,16 +80,16 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state)
 			a->I_max = t;
 			break;
 
-		case OPT_RF:
-			t = atof(arg);
-			if ((t < 1.0e3) || (t > 1.0e7))
-			{
-				fprintf(stderr, "# E: <Rf> is out of range. See \"vac --help\"\n");
-				return ARGP_ERR_UNKNOWN;
-			}
-			a->Rf = t;
-			a->Rf_flag = 1;
-			break;
+		// case OPT_RF:
+		// 	t = atof(arg);
+		// 	if ((t < 1.0e3) || (t > 1.0e7))
+		// 	{
+		// 		fprintf(stderr, "# E: <Rf> is out of range. See \"vac --help\"\n");
+		// 		return ARGP_ERR_UNKNOWN;
+		// 	}
+		// 	a->Rf = t;
+		// 	a->Rf_flag = 1;
+		// 	break;
 
 		case OPT_DELAY:
 			t = atof(arg);

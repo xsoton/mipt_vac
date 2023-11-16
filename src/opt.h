@@ -8,8 +8,8 @@ struct arguments
 	double V_stop;
 	double V_step;
 	double I_max;
-	int    Rf_flag;
-	double Rf;
+	// int    Rf_flag;
+	// double Rf;
 	int    Delay_flag;
 	double Delay;
 };

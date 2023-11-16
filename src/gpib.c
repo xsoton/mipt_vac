@@ -70,6 +70,8 @@ int gpib_read(int dev, char *buf, size_t buf_length)
 		}
 	}
 
+	// fprintf(stderr, "# read: \"%s\"\n", buf);
+
 	return ret;
 }
 
@@ -77,6 +79,8 @@ int gpib_write(int dev, const char *str)
 {
 	int r;
 	int ret = 0;
+
+	// fprintf(stderr, "# write: \"%s\"\n", str);
 
 	r = ibwrt(dev, str, strlen(str));
 	if (r & 0x8000)

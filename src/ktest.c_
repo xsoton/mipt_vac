@@ -1,0 +1,35 @@
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <unistd.h>
+#include <string.h>
+#include <errno.h>
+#include "k6485.h"
+
+int main(int argc, char const *argv[])
+{
+	double current;
+
+	struct k6485 k;
+
+	setlinebuf(stdout);
+	setlinebuf(stderr);
+
+	k6485_open(&k);
+	k6485_init(&k);
+	// k6485_get_current(&k, &current);
+
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+	k6485_get_current(&k, &current); fprintf(stderr, "current = %+le\n", current); usleep(1000000);
+
+	k6485_close(&k);
+
+	return 0;
+}

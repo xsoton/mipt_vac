@@ -20,6 +20,7 @@
 #include "gpib.h"
 #include "st.h"
 #include "v7.h"
+#include "k6485.h"
 #include "pps.h"
 #include "opt.h"
 
@@ -88,8 +89,8 @@ int main(int argc, char **argv)
 	arg.V_stop           = V_STOP;
 	arg.V_step           = V_STEP;
 	arg.I_max            = I_MAX;
-	arg.Rf_flag          = 0;
-	arg.Rf               = RF;
+	// arg.Rf_flag          = 0;
+	// arg.Rf               = RF;
 	arg.Delay_flag       = 0;
 	arg.Delay            = DELAY;
 
@@ -110,8 +111,8 @@ int main(int argc, char **argv)
 		fprintf(stderr, "# V_stop           = %le\n", arg.V_stop);
 		fprintf(stderr, "# V_step           = %le\n", arg.V_step);
 		fprintf(stderr, "# I_max            = %le\n", arg.I_max);
-		fprintf(stderr, "# Rf_flag          = %d\n" , arg.Rf_flag);
-		fprintf(stderr, "# Rf               = %le\n", arg.Rf);
+		// fprintf(stderr, "# Rf_flag          = %d\n" , arg.Rf_flag);
+		// fprintf(stderr, "# Rf               = %le\n", arg.Rf);
 		fprintf(stderr, "# Delay_flag       = %d\n" , arg.Delay_flag);
 		fprintf(stderr, "# Delay            = %le\n", arg.Delay);
 	#endif
@@ -226,8 +227,8 @@ static void *worker(void *a)
 	int r;
 
 	struct pps   pps = {0};
-	struct st    vm  = {0};
-	struct v7    am  = {0};
+	struct v7    vm  = {0};
+	struct k6485 am  = {0};
 
 	int    vac_index;
 	double vac_time;
@@ -239,7 +240,7 @@ static void *worker(void *a)
 	double pps_current1;
 	double pps_current2;
 	double vm_voltage;
-	double am_voltage;
+	double am_current;
 
 	double voltage;
 	int dir;
@@ -271,32 +272,32 @@ static void *worker(void *a)
 		goto worker_pps_close;
 	}
 
-	r = v7_open(&am);
+	r = v7_open(&vm);
 	if(r < 0)
 	{
 		fprintf(stderr, "# E: v7 open (%d)\n", r);
-		goto worker_am_close;
+		goto worker_vm_close;
 	}
 
-	r = v7_init(&am);
+	r = v7_init(&vm);
 	if(r < 0)
 	{
 		fprintf(stderr, "# E: v7 init (%d)\n", r);
+		goto worker_vm_close;
+	}
+
+	r = k6485_open(&am);
+	if(r < 0)
+	{
+		fprintf(stderr, "# E: k6485 open (%d)\n", r);
 		goto worker_am_close;
 	}
 
-	r = st_open(&vm);
+	r = k6485_init(&am);
 	if(r < 0)
 	{
-		fprintf(stderr, "# E: st open (%d)\n", r);
-		goto worker_vm_close;
-	}
-
-	r = st_init(&vm);
-	if(r < 0)
-	{
-		fprintf(stderr, "# E: st init (%d)\n", r);
-		goto worker_vm_close;
+		fprintf(stderr, "# E: k6485 init (%d)\n", r);
+		goto worker_am_close;
 	}
 
 	// === create vac file
@@ -321,7 +322,7 @@ static void *worker(void *a)
 		"#   V_stop      = %le\n"
 		"#   V_step      = %le\n"
 		"#   I_max       = %le\n"
-		"#   Rf          = %le\n"
+		// "#   Rf          = %le\n"
 		"#   Ts          = %le\n"
 		"#  1: index\n"
 		"#  2: time, s\n"
@@ -332,7 +333,7 @@ static void *worker(void *a)
 		"#  7: pps:ch2 voltage, V\n"
 		"#  8: pps:ch2 current, A\n"
 		"#  9: vm voltage, V\n"
-		"# 10: am voltage, V\n",
+		"# 10: am current, A\n",
 		start_time_struct.tm_year + 1900,
 		start_time_struct.tm_mon + 1,
 		start_time_struct.tm_mday,
@@ -344,7 +345,7 @@ static void *worker(void *a)
 		arg.V_stop,
 		arg.V_step,
 		arg.I_max,
-		arg.Rf,
+		// arg.Rf,
 		arg.Delay
 	);
 	if(r < 0)
@@ -541,17 +542,7 @@ static void *worker(void *a)
 		// fprintf(stderr, "# pps_current2 = %lf\n", pps_current2);
 
 		// fprintf(stderr, "# v7_get_voltage\n");
-		r = v7_get_voltage(&am, &am_voltage);
-		if(r < 0)
-		{
-			fprintf(stderr, "# E: Unable to get am voltage (%d)\n", r);
-			set_run(0);
-			break;
-		}
-		// fprintf(stderr, "# am_voltage = %lf\n", am_voltage);
-
-		// fprintf(stderr, "# st_get_voltage\n");
-		r = st_get_voltage(&vm, &vm_voltage);
+		r = v7_get_voltage(&vm, &vm_voltage);
 		if(r < 0)
 		{
 			fprintf(stderr, "# E: Unable to get vm voltage (%d)\n", r);
@@ -560,11 +551,21 @@ static void *worker(void *a)
 		}
 		// fprintf(stderr, "# vm_voltage = %lf\n", vm_voltage);
 
+		// fprintf(stderr, "# k6485_get_current\n");
+		r = k6485_get_current(&am, &am_current);
+		if(r < 0)
+		{
+			fprintf(stderr, "# E: Unable to get am current (%d)\n", r);
+			set_run(0);
+			break;
+		}
+		// fprintf(stderr, "# am_current = %lf\n", am_current);
+
 		// vm_voltage = 0;
 
 		// vac_voltage = pps_voltage1 - pps_voltage2;
 		vac_voltage = vm_voltage;
-		vac_current = am_voltage / arg.Rf;
+		vac_current = am_current;
 
 		fprintf(stderr, "\tV = %lf, I = %le", vac_voltage, vac_current);
 		fflush(stderr);
@@ -582,7 +583,7 @@ static void *worker(void *a)
 			pps_current1,
 			pps_current2,
 			vm_voltage,
-			am_voltage
+			am_current
 		);
 		if(r < 0)
 		{
@@ -637,12 +638,11 @@ static void *worker(void *a)
 	}
 	worker_vac_fopen:
 
-	st_deinit(&vm);
-	st_close(&vm);
-	worker_vm_close:
-
-	v7_close(&am);
+	k6485_close(&am);
 	worker_am_close:
+
+	v7_close(&vm);
+	worker_vm_close:
 
 	pps_close(&pps);
 	worker_pps_close:

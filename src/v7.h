@@ -4,7 +4,7 @@ struct v7
 {
 	int dev;
 	int status;
-	int V_range;
+	// int V_range;
 };
 
 int v7_open        (struct v7 *v);
